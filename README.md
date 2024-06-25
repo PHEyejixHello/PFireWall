@@ -1,16 +1,17 @@
-A Simple Minecraft Bedrock Server FireWall
-It can block some packets from hacker
+一个简单的MC基岩版服务器防火墙
+阻止来自攻击者的部分攻击
 
 
-Now function:
+目前功能:
 
-Prevent Dos attack  
-Prevent Empty-Packet Attack  
-Prevent Short-Packet Attack    
-Prevent Long-Packet Attack  
-Prevent No request Connect  
-Prevent No Magic_ID Connect  
-Prevent Re-send Request  
+小流量DOS攻击
+空包攻击
+过短包攻击
+过长包攻击
+Motd发包攻击(直接屏蔽了Motd)
+未经过请求连接发包
+离线包MagicID检查
+重复RequestC攻击
 
 
 

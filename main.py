@@ -5,6 +5,8 @@ from collections import defaultdict
 import re
 import logging
 import time
+import tkinter as tk
+from tkinter import ttk
 
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -32,42 +34,53 @@ last_interaction_time = defaultdict(lambda: defaultdict(float))
 # 用于存储每个IP是否已经接收到服务端的数据
 client_received_data = defaultdict(lambda: defaultdict(bool))
 
+# 用于存储每个IP的最后接收到的数据包
+last_received_packet = defaultdict(lambda: defaultdict(bytes))
 
 def is_valid_packet(data, addr):
     ip, port = addr
 
     # 检查数据包的长度
     if len(data) < 3:
-        logging.warning(f"Received packet from {addr} is too short, data discarded.")
+        #logging.warning(f"Received packet from {addr} is too short, data discarded.")
         return False
 
     # 检查数据包的类型
     packet_type = data[0]
     if packet_type not in list(range(256)):  # 允许所有类型的数据包
-        logging.warning(f"Received packet from {addr} with invalid type {packet_type}, data discarded.")
+        #logging.warning(f"Received packet from {addr} with invalid type {packet_type}, data discarded.")
         return False
 
     # 检查数据包的Magic字段
     if packet_type in [0x01, 0x02, 0x1c, 0x05, 0x06, 0x07, 0x08]:
         if packet_type in [0x01, 0x1c]: return False #直接拦截Motd 数据包
         if MAGIC.search(data) is None:
-            logging.warning(f"Received packet from {addr} does not contain valid Magic, data discarded.")
+            #logging.warning(f"Received packet from {addr} does not contain valid Magic, data discarded.")
             return False
 
     # 检查连接状态
     if connection_states[ip][port] == 0 and packet_type != 0x05:  # 如果还没有发送"Open Connection Request 1"
-        logging.warning(f"Received packet from {addr} before 'Open Connection Request 1', data discarded.")
+        #logging.warning(f"Received packet from {addr} before 'Open Connection Request 1', data discarded.")
         return False
 
     # 更新连接状态
     if packet_type == 0x05:  # 如果是"Open Connection Request 1"
-        if any(state == 1 for state in connection_states[ip].values()):
-            logging.warning(f"Received 'Open Connection Request 1' from {addr} but IP {ip} is already connected, data discarded.")
+        tmp = connection_states
+        if any(state == 1 for state in tmp[ip].values()):
+            #logging.warning(f"Received 'Open Connection Request 1' from {addr} but IP {ip} is already connected, data discarded.")
             return False
         connection_states[ip][port] = 1
 
+    # 检查数据包是否为线性相关
+    if last_received_packet[ip][port] == data:
+        #logging.warning(f"Received duplicate packet from {addr}, data discarded.")
+        return False
+
     # 更新最后交互时间
     last_interaction_time[ip][port] = time.time()
+
+    # 更新最后接收到的数据包
+    last_received_packet[ip][port] = data
 
     # 如果数据包是有效的，返回True
     return True
@@ -78,23 +91,29 @@ def reset_packet_counts():
 
 def check_disconnections():
     current_time = time.time()
-    for ip, ports in list(last_interaction_time.items()):
-        for port, last_time in list(ports.items()):
+    tmp = list(last_interaction_time.items())
+    for ip, ports in tmp:
+        tmp2 = list(ports.items())
+        for port, last_time in tmp2:
             if client_received_data[ip][port] and current_time - last_time > 10:  # 超过10秒没有交互
                 logging.info(f"Connection from {ip}:{port} timed out, clearing state.")
                 del connection_states[ip][port]
                 del last_interaction_time[ip][port]
                 del client_received_data[ip][port]
+                del last_received_packet[ip][port]
                 if not connection_states[ip]:
                     del connection_states[ip]
                 if not last_interaction_time[ip]:
                     del last_interaction_time[ip]
                 if not client_received_data[ip]:
                     del client_received_data[ip]
+                if not last_received_packet[ip]:
+                    del last_received_packet[ip]
     threading.Timer(1, check_disconnections).start()
 
 def print_stats(stats):
-    for ip, data in stats.items():
+    tmp = stats
+    for ip, data in tmp.items():
         recv_kb, sent_kb = data['recv'] / 1024, data['sent'] / 1024
         logging.info(f"IP: {ip}, Received: {recv_kb:.2f}KB, Sent: {sent_kb:.2f}KB")
     stats.clear()
@@ -108,17 +127,18 @@ def forward_data(source_socket, target_address, stats):
     while True:
         sockets = [source_socket] + list(addr_map.values())
         ready_to_read, _, _ = select.select(sockets, [], [], 0.05)
-        for sock in ready_to_read:
+        tmp = ready_to_read
+        for sock in tmp:
             if sock == source_socket:
                 try:
                     data, addr = source_socket.recvfrom(65536)  # 将缓冲区大小设置为65536字节
                     if len(data) > MAX_PACKET_SIZE:
-                        logging.warning("Received data is larger than buffer size, data discarded.")
+                        #logging.warning("Received data is larger than buffer size, data discarded.")
                         continue
                     if not is_valid_packet(data, addr):
                         continue
                     if packet_counts[addr[0]] >= MAX_PACKETS_PER_SECOND:
-                        logging.warning(f"Received too many packets from {addr[0]}, data discarded.")
+                        #logging.warning(f"Received too many packets from {addr[0]}, data discarded.")
                         continue
                     packet_counts[addr[0]] += 1
                     stats[addr[0]]['recv'] += len(data)
@@ -133,9 +153,10 @@ def forward_data(source_socket, target_address, stats):
                 try:
                     data, addr = sock.recvfrom(65536)  # 将缓冲区大小设置为65536字节
                     if len(data) > MAX_PACKET_SIZE:
-                        logging.warning("Received data is larger than buffer size, data discarded.")
+                        #logging.warning("Received data is larger than buffer size, data discarded.")
                         continue
-                    client_addr = [k for k, v in addr_map.items() if v == sock][0]
+                    tmp2 = list(addr_map.items())
+                    client_addr = [k for k, v in tmp2 if v == sock][0]
                     stats[client_addr[0]]['sent'] += len(data)
                     source_socket.sendto(data, client_addr)  # 将数据发送回原来的客户端
                     client_received_data[client_addr[0]][client_addr[1]] = True  # 标记客户端已接收到数据
@@ -164,9 +185,37 @@ def main():
         threading.Timer(1, reset_packet_counts).start()  # 每1秒重置数据包计数
         threading.Timer(1, check_disconnections).start()  # 每1秒检查断开连接
 
+        # 创建GUI界面
+        root = tk.Tk()
+        root.title("PFireWall MCBE防火墙")
+
+        # 创建一个表格来显示统计信息
+        table = ttk.Treeview(root, columns=("IP", "接收", "发送"), show="headings")
+        table.heading("IP", text="IP地址")
+        table.heading("接收", text="接收数据包大小（KB）")
+        table.heading("发送", text="发送数据包大小（KB）")
+        table.pack(fill=tk.BOTH, expand=True)
+
+        # 更新表格数据
+        def update_table():
+            nonlocal stats
+            table.delete(*table.get_children())
+            tmp = stats
+            for ip, data in tmp.items():
+                recv_kb, sent_kb = data['recv'] / 1024, data['sent'] / 1024
+                table.insert("", "end", values=(ip, f"{recv_kb:.2f}", f"{sent_kb:.2f}"))
+            root.after(1000, update_table)
+
+        update_table()
+
+        # 运行GUI循环
+        root.mainloop()
+
     except Exception as e:
         logging.error(f"发生错误：{e}")
         # 继续运行程序
 
 if __name__ == "__main__":
     main()
+
+

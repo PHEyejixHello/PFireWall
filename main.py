@@ -186,36 +186,39 @@ def main():
         threading.Timer(1, check_disconnections).start()  # 每1秒检查断开连接
 
         # 创建GUI界面
-        root = tk.Tk()
-        root.title("PFireWall MCBE防火墙")
-
-        # 创建一个表格来显示统计信息
-        table = ttk.Treeview(root, columns=("IP", "接收", "发送"), show="headings")
-        table.heading("IP", text="IP地址")
-        table.heading("接收", text="接收数据包大小（KB）")
-        table.heading("发送", text="发送数据包大小（KB）")
-        table.pack(fill=tk.BOTH, expand=True)
-
-        # 更新表格数据
-        def update_table():
-            nonlocal stats
-            table.delete(*table.get_children())
-            tmp = stats
-            for ip, data in tmp.items():
-                recv_kb, sent_kb = data['recv'] / 1024, data['sent'] / 1024
-                table.insert("", "end", values=(ip, f"{recv_kb:.2f}", f"{sent_kb:.2f}"))
-            root.after(1000, update_table)
-
-        update_table()
-
-        # 运行GUI循环
-        root.mainloop()
+        gui_thread = threading.Thread(target=create_gui, args=(stats,))
+        gui_thread.start()
 
     except Exception as e:
         logging.error(f"发生错误：{e}")
         # 继续运行程序
 
+def create_gui(stats):
+    root = tk.Tk()
+    root.title("PFireWall MCBE防火墙")
+
+    # 创建一个表格来显示统计信息
+    table = ttk.Treeview(root, columns=("IP", "接收", "发送"), show="headings")
+    table.heading("IP", text="IP地址")
+    table.heading("接收", text="接收数据包大小（KB）")
+    table.heading("发送", text="发送数据包大小（KB）")
+    table.pack(fill=tk.BOTH, expand=True)
+
+    # 更新表格数据
+    def update_table():
+        nonlocal stats
+        table.delete(*table.get_children())
+        tmp = stats
+        for ip, data in tmp.items():
+            recv_kb, sent_kb = data['recv'] / 1024, data['sent'] / 1024
+            table.insert("", "end", values=(ip, f"{recv_kb:.2f}", f"{sent_kb:.2f}"))
+        root.after(1000, update_table)
+
+    update_table()
+
+    # 运行GUI循环
+    root.mainloop()
+
 if __name__ == "__main__":
     main()
-
 

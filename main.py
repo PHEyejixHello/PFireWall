@@ -57,8 +57,8 @@ def is_valid_packet(data, addr):
     if packet_type not in list(range(256)):  # 允许所有类型的数据包
         # logging.warning(f"Received packet from {addr} with invalid type {packet_type}, data discarded.")
         return False
-    # 0x1c, 0x06, 0x08, 0x10为服务器Reply包 0x05为Disconnect包
-    if packet_type == [0x1c, 0x06, 0x08, 0x10, 0x05]: return False  # 服务器数据包
+    # 0x1c, 0x06, 0x08, 0x10为服务器Reply包 
+    if packet_type == [0x1c, 0x06, 0x08, 0x10]: return False  # 服务器数据包
 
     # 检查数据包的Magic字段
     if packet_type in [0x01, 0x05, 0x07]:

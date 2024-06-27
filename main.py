@@ -7,7 +7,6 @@ import logging
 import time
 import tkinter as tk
 from tkinter import ttk
-import binascii
 
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -40,6 +39,7 @@ client_received_data = defaultdict(lambda: defaultdict(bool))
 # 用于存储每个IP的最后接收到的数据包
 last_received_packet = defaultdict(lambda: defaultdict(bytes))
 
+# Motd 包记录
 last_01_packet_time = {}
 
 
@@ -57,8 +57,8 @@ def is_valid_packet(data, addr):
     if packet_type not in list(range(256)):  # 允许所有类型的数据包
         # logging.warning(f"Received packet from {addr} with invalid type {packet_type}, data discarded.")
         return False
-
-    if packet_type == [0x1c, 0x06, 0x08, 0x10]: return False  # 服务器数据包
+    # 0x1c, 0x06, 0x08, 0x10为服务器Reply包 0x05为Disconnect包
+    if packet_type == [0x1c, 0x06, 0x08, 0x10, 0x05]: return False  # 服务器数据包
 
     # 检查数据包的Magic字段
     if packet_type in [0x01, 0x05, 0x07]:
@@ -73,8 +73,9 @@ def is_valid_packet(data, addr):
 
     if packet_type == 0x07 and connection_check[ip][port] == 2:
         connection_check[ip][port] = 3
-    elif packet_type == 0x07 and connection_check[ip][port] != 2:
+    elif packet_type != 0x07 and connection_check[ip][port] == 2:
         connection_check[ip][port] = 0
+        return False
 
     # 更新连接状态
     if connection_check[ip][port] == 4:  # 如果是"Open Connection Request 1"
@@ -89,7 +90,7 @@ def is_valid_packet(data, addr):
 
     if connection_states[ip][port] == 0 and packet_type not in [0x01, 0x05, 0x07,
                                                                 0x09]:  # 如果还没有发送"Open Connection Request 1"
-        #logging.warning(f"Received packet from {addr} before 'Open Connection Request 1', data discarded.")
+        # logging.warning(f"Received packet from {addr} before 'Open Connection Request 1', data discarded.")
         return False
 
     # 检查数据包是否为线性相关
@@ -101,7 +102,7 @@ def is_valid_packet(data, addr):
         last_send_time = last_01_packet_time.get(ip, 0)
         time_since_last_send = current_time - last_send_time
         if time_since_last_send < 1:  # 如果距离上次发送不足1秒
-            #logging.warning(f"Client {ip} attempted to send more than one 0x01 packet within a second, discarding.")
+            # logging.warning(f"Client {ip} attempted to send more than one 0x01 packet within a second, discarding.")
             return False
         last_01_packet_time[ip] = current_time  # 更新最后发送0x01类型数据包的时间
 
@@ -177,7 +178,7 @@ def forward_data(source_socket, target_address, stats, target_port, source_port)
                     stats[addr[0]]['recv'] += len(data)
                     if addr not in addr_map:
                         forward_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                        forward_socket.setblocking(0)  # 设置为非阻塞模式
+                        forward_socket.setblocking(False)  # 设置为非阻塞模式
                         addr_map[addr] = forward_socket
                     addr_map[addr].sendto(data, target_address)
                 except BlockingIOError:
@@ -185,33 +186,35 @@ def forward_data(source_socket, target_address, stats, target_port, source_port)
             else:
                 try:
                     data, addr = sock.recvfrom(65536)  # 将缓冲区大小设置为65536字节
-                    if len(data) > MAX_PACKET_SIZE:
-                        # logging.warning("Received data is larger than buffer size, data discarded.")
-                        continue
-                    if data[0] == 0x1c:
-                        data = data.replace(target_port.encode('utf-8'), source_port.encode('utf-8'))
 
                     tmp2 = list(addr_map.items())
                     client_addr = [k for k, v in tmp2 if v == sock][0]
-                    stats[client_addr[0]]['sent'] += len(data)
-                    source_socket.sendto(data, client_addr)  # 将数据发送回原来的客户端
 
-                    # 交手包顺序验证
+                    if len(data) > MAX_PACKET_SIZE:
+                        # logging.warning("Received data is larger than buffer size, data discarded.")
+                        continue
+
+                    if data[0] == 0x1c:
+                        data = data.replace(target_port.encode('utf-8'), source_port.encode('utf-8'))
 
                     if data[0] == 0x06 and connection_check[client_addr[0]][client_addr[1]] == 1:
                         connection_check[client_addr[0]][client_addr[1]] = 2
-                    elif data[0] == 0x06 and connection_check[client_addr[0]][client_addr[1]] == 1:
+                    elif data[0] != 0x06 and connection_check[client_addr[0]][client_addr[1]] == 1:
                         connection_check[client_addr[0]][client_addr[1]] = 0
+                        continue
 
                     if data[0] == 0x08 and connection_check[client_addr[0]][client_addr[1]] == 3:
                         connection_check[client_addr[0]][client_addr[1]] = 4
-                    elif data[0] == 0x08 and connection_check[client_addr[0]][client_addr[1]] != 3:
+                    elif data[0] != 0x08 and connection_check[client_addr[0]][client_addr[1]] == 3:
                         connection_check[client_addr[0]][client_addr[1]] = 0
+                        continue
+
+                    stats[client_addr[0]]['sent'] += len(data)
+                    source_socket.sendto(data, client_addr)  # 将数据发送回原来的客户端
 
                     client_received_data[client_addr[0]][client_addr[1]] = True  # 标记客户端已接收到数据
                 except BlockingIOError:
                     continue  # 没有数据可读
-
 
 def main():
     try:
